@@ -11,8 +11,11 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 
+import pandas as pd
+
 from ashare_pilot import backtest
 from ashare_pilot.analysis import cost as cost_analysis
+from ashare_pilot.analysis import strength as strength_analysis
 from ashare_pilot.config import DEFAULT
 from ashare_pilot.datasource import build_default_source
 from ashare_pilot.datasource.stockapi_source import StockApiSource
@@ -134,6 +137,47 @@ def cmd_cost(args: argparse.Namespace) -> None:
         print(f"    你成本之下成交 {b2:.0%} | 之上 {a2:.0%}(你成本上方的套牢盘比例)")
 
 
+_INDEX_NAMES = {
+    "sh000001": "上证指数", "sz399001": "深证成指", "sz399006": "创业板指",
+    "sh000688": "科创50", "sh000300": "沪深300",
+}
+
+
+def _fetch_index_close(symbol: str) -> pd.Series:
+    """拉指数收盘价(akshare 新浪指数日线，带重试)。"""
+    import time
+    import akshare as ak
+    last = None
+    for _ in range(4):
+        try:
+            df = ak.stock_zh_index_daily(symbol=symbol)
+            if df is not None and len(df):
+                df = df.copy()
+                df["date"] = pd.to_datetime(df["date"])
+                return df.set_index("date")["close"].astype("float64")
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            time.sleep(2)
+    raise RuntimeError(f"指数 {symbol} 获取失败：{last}")
+
+
+def cmd_strength(args: argparse.Namespace) -> None:
+    src = build_default_source(DEFAULT.cache_dir)
+    stock = src.fetch_daily(args.symbol, args.start, args.end,
+                            adjust=DEFAULT.adjust, refresh=args.refresh)["close"]
+    idx = _fetch_index_close(args.index)
+    window = args.window or None  # 0 -> 全区间
+    r = strength_analysis.relative_strength(stock, idx, window=window)
+    iname = _INDEX_NAMES.get(args.index, args.index)
+    win = f"近{args.window}日" if window else "全区间"
+    print(f"\n{args.symbol} vs {iname}  ({win})")
+    print(f"  个股涨跌 {r.stock_return:+.2%}")
+    print(f"  指数涨跌 {r.bench_return:+.2%}")
+    print(f"  超额收益 {r.excess:+.2%}  -> {'🟢 跑赢大盘' if r.outperforming else '🔴 跑输大盘'}")
+    if not r.outperforming:
+        print("  ⚠️ 跑输大盘=个股独自走弱，别指望大盘反弹来救它(方法论 §4)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ashare-pilot", description="A股策略研究与信号系统")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -179,6 +223,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_cost.add_argument("--bin", type=float, default=2.0, help="筹码分布价格档宽(元)")
     p_cost.add_argument("--refresh", action="store_true", help="忽略缓存强制重拉")
     p_cost.set_defaults(func=cmd_cost)
+
+    p_str = sub.add_parser("strength", help="个股 vs 大盘强弱对比(超额收益)")
+    p_str.add_argument("--symbol", required=True, help="股票代码")
+    p_str.add_argument("--index", default="sh000300",
+                       help="基准指数(sh000300沪深300/sz399006创业板/sh000001上证)")
+    p_str.add_argument("--window", type=int, default=20, help="回看交易日数(0=全区间)")
+    p_str.add_argument("--start", default=_default_start(), help="起始日 YYYYMMDD")
+    p_str.add_argument("--end", default=_today(), help="结束日 YYYYMMDD")
+    p_str.add_argument("--refresh", action="store_true", help="忽略缓存强制重拉")
+    p_str.set_defaults(func=cmd_strength)
 
     return parser
 

@@ -4,6 +4,6 @@
 只做"看清楚现状"的衍生计算。
 """
 
-from . import cost
+from . import cost, strength
 
-__all__ = ["cost"]
+__all__ = ["cost", "strength"]
