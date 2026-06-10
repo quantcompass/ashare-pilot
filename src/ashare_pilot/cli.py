@@ -12,6 +12,7 @@ import argparse
 import datetime as _dt
 
 from ashare_pilot import backtest
+from ashare_pilot.analysis import cost as cost_analysis
 from ashare_pilot.config import DEFAULT
 from ashare_pilot.datasource import build_default_source
 from ashare_pilot.datasource.stockapi_source import StockApiSource
@@ -96,6 +97,43 @@ def cmd_scan_breakout(args: argparse.Namespace) -> None:
               f"{h.since_launch:>+9.0%}{h.from_peak:>+8.0%}  {h.stage}")
 
 
+def cmd_cost(args: argparse.Namespace) -> None:
+    src = build_default_source(DEFAULT.cache_dir)
+    df = src.fetch_daily(args.symbol, args.start, args.end,
+                         adjust=DEFAULT.adjust, refresh=args.refresh)
+    if "volume" not in df.columns or df.empty:
+        print("该数据源未提供成交量，无法做成本估算(换 stockapi 源/确认有 volume)")
+        return
+    cur = float(df["close"].iloc[-1])
+    print(f"\n{args.symbol}  最新 {df.index[-1].date()}  现价 {cur:.2f}")
+    print("  ⚠️ 以下为 VWAP+筹码分布的粗略代理，非真实主力成本")
+
+    # 分阶段 VWAP
+    print("  === 分阶段 VWAP(市场平均成本代理) ===")
+    for label, days in [("全区间", None), ("近6个月", 180), ("近3个月", 90), ("近1个月", 30)]:
+        sub = df if days is None else df[df.index >= df.index[-1] - _dt.timedelta(days=days)]
+        if len(sub) >= 2:
+            w = cost_analysis.vwap(sub)
+            print(f"    {label:8s} VWAP≈{w:8.2f}  现价距此 {cur/w-1:+.1%}")
+
+    # 筹码密集区
+    print("  === 成交密集区(筹码分布粗估) ===")
+    dist = cost_analysis.chip_distribution(df, bin_width=args.bin)
+    for rng, pct in dist.head(5).items():
+        bar = "#" * int(pct / dist.iloc[0] * 20)
+        print(f"    {rng.left:7.2f}~{rng.right:<7.2f} {pct:4.0%}  {bar}")
+
+    below, above = cost_analysis.position_ratio(df, cur)
+    print(f"  现价下方 {below:.0%}(浮盈) | 上方 {above:.0%}(套牢)")
+
+    if args.my_cost:
+        mc = args.my_cost
+        print(f"  === 你的成本 {mc:.2f} ===")
+        print(f"    浮盈亏 {cur/mc-1:+.1%}  现价{'低于' if cur<mc else '高于'}你成本 {abs(cur-mc):.2f}")
+        b2, a2 = cost_analysis.position_ratio(df, mc)
+        print(f"    你成本之下成交 {b2:.0%} | 之上 {a2:.0%}(你成本上方的套牢盘比例)")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ashare-pilot", description="A股策略研究与信号系统")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -131,6 +169,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_bk.add_argument("--pct", type=float, default=0.09, help="涨幅阈值（0.09=9%%）")
     p_bk.add_argument("--limit", type=int, default=0, help="限制扫描数量（0=不限）")
     p_bk.set_defaults(func=cmd_scan_breakout)
+
+    p_cost = sub.add_parser("cost", help="估算市场成本(VWAP+筹码分布)及你的相对位置")
+    p_cost.add_argument("--symbol", required=True, help="股票代码")
+    p_cost.add_argument("--start", default=_default_start(), help="起始日 YYYYMMDD")
+    p_cost.add_argument("--end", default=_today(), help="结束日 YYYYMMDD")
+    p_cost.add_argument("--my-cost", type=float, default=0.0, dest="my_cost",
+                        help="你的持仓成本(可选，给出后显示你的相对位置)")
+    p_cost.add_argument("--bin", type=float, default=2.0, help="筹码分布价格档宽(元)")
+    p_cost.add_argument("--refresh", action="store_true", help="忽略缓存强制重拉")
+    p_cost.set_defaults(func=cmd_cost)
 
     return parser
 
