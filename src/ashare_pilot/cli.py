@@ -14,8 +14,9 @@ import datetime as _dt
 from ashare_pilot import backtest
 from ashare_pilot.config import DEFAULT
 from ashare_pilot.datasource import build_default_source
+from ashare_pilot.datasource.stockapi_source import StockApiSource
 from ashare_pilot.notify import ConsoleNotifier
-from ashare_pilot.screener import scan_buy_signals
+from ashare_pilot.screener import scan_breakouts, scan_buy_signals
 from ashare_pilot.strategy import golden_cross
 
 
@@ -73,6 +74,28 @@ def cmd_screen(args: argparse.Namespace) -> None:
     ConsoleNotifier().send("选股扫描 · 金叉买入候选", msg)
 
 
+def cmd_scan_breakout(args: argparse.Namespace) -> None:
+    # 按概念名取股票池（依赖 stockapi token）
+    pool = StockApiSource().list_by_concept(args.concept, cache_dir=DEFAULT.cache_dir)
+    if args.limit:
+        pool = pool[:args.limit]
+    print(f"概念「{args.concept}」共 {len(pool)} 只，扫描巨量启动波段中…")
+    hits = scan_breakouts(
+        build_default_source(DEFAULT.cache_dir), pool, args.start, args.end,
+        recent_days=args.recent, vol_ratio=args.vol_ratio, pct_change=args.pct,
+        adjust=DEFAULT.adjust,
+    )
+    hits.sort(key=lambda h: h.from_peak)
+    if not hits:
+        print("  未发现巨量启动型波段股")
+        return
+    print(f"\n发现 {len(hits)} 只巨量启动型波段股：")
+    print(f"  {'代码':<8}{'启动日':>11}{'涨幅':>7}{'量比':>6}{'启动至今':>9}{'距高点':>8}  阶段")
+    for h in hits:
+        print(f"  {h.symbol:<8}{h.launch_date:>11}{h.launch_gain:>+7.1%}{h.vol_ratio:>5.1f}x"
+              f"{h.since_launch:>+9.0%}{h.from_peak:>+8.0%}  {h.stage}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ashare-pilot", description="A股策略研究与信号系统")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -98,6 +121,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_scr = sub.add_parser("screen", help="扫描自选股池的当日买入信号")
     add_common(p_scr, need_symbol=False)
     p_scr.set_defaults(func=cmd_screen)
+
+    p_bk = sub.add_parser("scan-breakout", help="按概念扫描「巨量启动」波段股并标注阶段")
+    p_bk.add_argument("--concept", required=True, help="概念名，如 广告营销 / AIGC概念")
+    p_bk.add_argument("--start", default=_default_start(), help="起始日 YYYYMMDD")
+    p_bk.add_argument("--end", default=_today(), help="结束日 YYYYMMDD")
+    p_bk.add_argument("--recent", type=int, default=15, help="只看近 N 个交易日内的启动")
+    p_bk.add_argument("--vol-ratio", type=float, default=3.0, dest="vol_ratio", help="量比阈值")
+    p_bk.add_argument("--pct", type=float, default=0.09, help="涨幅阈值（0.09=9%%）")
+    p_bk.add_argument("--limit", type=int, default=0, help="限制扫描数量（0=不限）")
+    p_bk.set_defaults(func=cmd_scan_breakout)
 
     return parser
 

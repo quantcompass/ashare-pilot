@@ -114,3 +114,38 @@ def test_empty_data_returns_empty_df(monkeypatch):
     df = StockApiSource(token="TK").fetch_daily("600519", "20240102", "20240103")
     assert len(df) == 0
     assert df.index.name == "date"
+
+
+def _all_list_payload():
+    return {"code": 20000, "msg": "success", "data": [
+        {"api_code": "301171", "jys": "SZ", "name": "易点天下", "gl": "广告营销,AIGC概念"},
+        {"api_code": "600519", "jys": "SH", "name": "贵州茅台", "gl": "白酒"},
+        {"api_code": "300058", "jys": "SZ", "name": "蓝色光标", "gl": "广告营销,AI应用"},
+    ]}
+
+
+def test_list_by_concept(monkeypatch, tmp_path):
+    """按概念名从 A股列表筛代码。"""
+    monkeypatch.setattr(
+        "ashare_pilot.datasource.stockapi_source.requests.get",
+        lambda *a, **k: _FakeResp(_all_list_payload()),
+    )
+    codes = StockApiSource(token="TK").list_by_concept("广告营销", cache_dir=tmp_path)
+    assert "301171" in codes
+    assert "300058" in codes
+    assert "600519" not in codes
+
+
+def test_list_by_concept_uses_cache(monkeypatch, tmp_path):
+    """A股列表每日限 2 次 -> 必须本地缓存，第二次不再联网。"""
+    calls = {"n": 0}
+
+    def fake_get(*a, **k):
+        calls["n"] += 1
+        return _FakeResp(_all_list_payload())
+    monkeypatch.setattr("ashare_pilot.datasource.stockapi_source.requests.get", fake_get)
+
+    src = StockApiSource(token="TK")
+    src.list_by_concept("广告营销", cache_dir=tmp_path)
+    src.list_by_concept("AIGC概念", cache_dir=tmp_path)  # 不同概念，仍走缓存
+    assert calls["n"] == 1  # 只联网一次，第二次读本地
