@@ -22,6 +22,8 @@ class Config:
     fee_rate: float = 0.0003  # 万三，粗略示意，实际含印花税/佣金/过户费
     # 复权方式
     adjust: str = "qfq"
+    # 本地缓存目录（历史日线落盘复用）
+    cache_dir: str = "data/cache"
 
 
 DEFAULT = Config()

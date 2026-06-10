@@ -13,7 +13,7 @@ import datetime as _dt
 
 from ashare_pilot import backtest
 from ashare_pilot.config import DEFAULT
-from ashare_pilot.datasource import AkshareSource
+from ashare_pilot.datasource import build_default_source
 from ashare_pilot.notify import ConsoleNotifier
 from ashare_pilot.screener import scan_buy_signals
 from ashare_pilot.strategy import golden_cross
@@ -29,7 +29,7 @@ def _default_start() -> str:
 
 
 def cmd_backtest(args: argparse.Namespace) -> None:
-    src = AkshareSource()
+    src = build_default_source(DEFAULT.cache_dir)
     df = src.fetch_daily(args.symbol, args.start, args.end, adjust=DEFAULT.adjust)
     signals = golden_cross.generate_signals(df["close"], fast=args.fast, slow=args.slow)
     result = backtest.run(
@@ -45,7 +45,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
 
 def cmd_signal(args: argparse.Namespace) -> None:
-    src = AkshareSource()
+    src = build_default_source(DEFAULT.cache_dir)
     df = src.fetch_daily(args.symbol, args.start, args.end, adjust=DEFAULT.adjust)
     signals = golden_cross.generate_signals(df["close"], fast=args.fast, slow=args.slow)
     latest = signals.iloc[-1]
@@ -58,11 +58,18 @@ def cmd_signal(args: argparse.Namespace) -> None:
 
 
 def cmd_screen(args: argparse.Namespace) -> None:
-    buys = scan_buy_signals(
-        AkshareSource(), DEFAULT.watchlist, args.start, args.end,
+    result = scan_buy_signals(
+        build_default_source(DEFAULT.cache_dir), DEFAULT.watchlist, args.start, args.end,
         fast=args.fast, slow=args.slow, adjust=DEFAULT.adjust,
     )
-    msg = "\n".join(f"  {s}  现价 {p:.2f}" for s, p in buys) or "  今日无金叉买入信号"
+    if result.all_failed:
+        msg = (f"  ⚠️ 全部 {result.total} 只取数失败，结果不可信！\n"
+               + "\n".join(f"    {s}：{reason}" for s, reason in result.failed))
+    else:
+        lines = [f"  {s}  现价 {p:.2f}" for s, p in result.hits] or ["  今日无金叉买入信号"]
+        if result.failed:
+            lines.append(f"  （另有 {len(result.failed)} 只取数失败被跳过）")
+        msg = "\n".join(lines)
     ConsoleNotifier().send("选股扫描 · 金叉买入候选", msg)
 
 
