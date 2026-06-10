@@ -30,7 +30,7 @@ def _default_start() -> str:
 
 def cmd_backtest(args: argparse.Namespace) -> None:
     src = build_default_source(DEFAULT.cache_dir)
-    df = src.fetch_daily(args.symbol, args.start, args.end, adjust=DEFAULT.adjust)
+    df = src.fetch_daily(args.symbol, args.start, args.end, adjust=DEFAULT.adjust, refresh=args.refresh)
     signals = golden_cross.generate_signals(df["close"], fast=args.fast, slow=args.slow)
     result = backtest.run(
         df["close"], signals, initial_cash=DEFAULT.initial_cash, fee_rate=DEFAULT.fee_rate
@@ -46,7 +46,7 @@ def cmd_backtest(args: argparse.Namespace) -> None:
 
 def cmd_signal(args: argparse.Namespace) -> None:
     src = build_default_source(DEFAULT.cache_dir)
-    df = src.fetch_daily(args.symbol, args.start, args.end, adjust=DEFAULT.adjust)
+    df = src.fetch_daily(args.symbol, args.start, args.end, adjust=DEFAULT.adjust, refresh=args.refresh)
     signals = golden_cross.generate_signals(df["close"], fast=args.fast, slow=args.slow)
     latest = signals.iloc[-1]
     action = {1: "🟢 金叉 买入", -1: "🔴 死叉 卖出", 0: "⚪ 无信号 持有/观望"}[int(latest)]
@@ -60,7 +60,7 @@ def cmd_signal(args: argparse.Namespace) -> None:
 def cmd_screen(args: argparse.Namespace) -> None:
     result = scan_buy_signals(
         build_default_source(DEFAULT.cache_dir), DEFAULT.watchlist, args.start, args.end,
-        fast=args.fast, slow=args.slow, adjust=DEFAULT.adjust,
+        fast=args.fast, slow=args.slow, adjust=DEFAULT.adjust, refresh=args.refresh,
     )
     if result.all_failed:
         msg = (f"  ⚠️ 全部 {result.total} 只取数失败，结果不可信！\n"
@@ -84,6 +84,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--end", default=_today(), help="结束日 YYYYMMDD")
         p.add_argument("--fast", type=int, default=DEFAULT.fast, help="快线窗口")
         p.add_argument("--slow", type=int, default=DEFAULT.slow, help="慢线窗口")
+        p.add_argument("--refresh", action="store_true",
+                       help="忽略本地缓存，强制重新联网拉取（盘中要最新值时用）")
 
     p_bt = sub.add_parser("backtest", help="回测单只股票")
     add_common(p_bt, need_symbol=True)

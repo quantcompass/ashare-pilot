@@ -34,15 +34,19 @@ def scan_buy_signals(
     fast: int = 5,
     slow: int = 20,
     adjust: str = "qfq",
+    refresh: bool = False,
 ) -> ScanResult:
     """扫描 symbols，返回 ScanResult。
 
     单只取数失败时记录到 failed 并继续，不中断整体扫描，也不伪装成「无信号」。
+    refresh=True 时强制重拉（透传给支持的数据源，如 CachedSource）。
     """
+    # 仅在需要刷新时才传 refresh，避免给不支持该参数的源报错
+    extra = {"refresh": True} if refresh else {}
     result = ScanResult(total=len(symbols))
     for symbol in symbols:
         try:
-            df = source.fetch_daily(symbol, start, end, adjust=adjust)
+            df = source.fetch_daily(symbol, start, end, adjust=adjust, **extra)
             signals = golden_cross.generate_signals(df["close"], fast=fast, slow=slow)
             if int(signals.iloc[-1]) == 1:
                 result.hits.append((symbol, float(df["close"].iloc[-1])))
