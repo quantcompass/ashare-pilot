@@ -61,3 +61,21 @@ def test_raises_when_all_sources_fail():
 def test_empty_source_list_raises():
     with pytest.raises(ValueError):
         FallbackSource([])
+
+
+def test_falls_back_on_data_integrity_error():
+    """主源返回坏数据(DataIntegrityError)时，应回落到备源。"""
+    from ashare_pilot.datasource.base import DataIntegrityError
+
+    class _BadDataSource:
+        def __init__(self):
+            self.calls = 0
+
+        def fetch_daily(self, symbol, start, end, adjust="qfq"):
+            self.calls += 1
+            raise DataIntegrityError("OHLC 错乱")
+
+    first, second = _BadDataSource(), _GoodSource(2)
+    df = FallbackSource([first, second]).fetch_daily("002654", "20260101", "20260201")
+    assert df["close"].iloc[0] == 2.0   # 用了备源
+    assert first.calls == 1 and second.calls == 1

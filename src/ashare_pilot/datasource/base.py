@@ -42,3 +42,42 @@ def validate(df: pd.DataFrame) -> pd.DataFrame:
     if df.index.name != "date":
         raise ValueError(f"索引名必须为 'date'，实际为 {df.index.name!r}")
     return df
+
+
+class DataIntegrityError(ValueError):
+    """行情数据自相矛盾(OHLC 错乱/负价等)，多见于数据源间歇性返回坏数据。
+
+    继承 ValueError，便于上层(如 FallbackSource)用 except 兜住并回落到备源。
+    """
+
+
+def check_ohlc_sane(df: pd.DataFrame) -> pd.DataFrame:
+    """校验 OHLC 是否自洽，干净则原样返回，错乱则抛 DataIntegrityError。
+
+    检查每根 K 线满足：
+    - 四价均为正且非 NaN
+    - high >= open / close / low（最高价名副其实）
+    - low  <= open / close / high（最低价名副其实）
+
+    用于拦截 stockapi 个别票偶发的坏数据(如复权算错导致 high<open)。
+    空 DataFrame 视为合法(由别处处理)。
+    """
+    if df.empty:
+        return df
+
+    o, h, l, c = df["open"], df["high"], df["low"], df["close"]
+
+    positive = (o > 0) & (h > 0) & (l > 0) & (c > 0)
+    high_ok = (h >= o) & (h >= c) & (h >= l)
+    low_ok = (l <= o) & (l <= c) & (l <= h)
+    # NaN 参与比较得 False，会被下面判为坏行
+    sane = positive & high_ok & low_ok
+
+    bad = int((~sane).sum())
+    if bad:
+        first = df.index[~sane][0]
+        raise DataIntegrityError(
+            f"检测到 {bad} 行 OHLC 错乱/异常数据(首个异常日 {first.date()})，"
+            f"疑似数据源返回了坏数据"
+        )
+    return df

@@ -149,3 +149,19 @@ def test_list_by_concept_uses_cache(monkeypatch, tmp_path):
     src.list_by_concept("广告营销", cache_dir=tmp_path)
     src.list_by_concept("AIGC概念", cache_dir=tmp_path)  # 不同概念，仍走缓存
     assert calls["n"] == 1  # 只联网一次，第二次读本地
+
+
+def test_broken_ohlc_raises_integrity_error(monkeypatch):
+    """stockapi 返回 OHLC 错乱(high<open)时应抛 DataIntegrityError。"""
+    from ashare_pilot.datasource.base import DataIntegrityError
+    bad = {"code": 20000, "msg": "success", "data": [
+        {"code": "002654.SZ", "time": "2026-06-09",
+         "open": "6.62", "high": "6.49", "low": "6.59", "close": "6.59",
+         "volume": "100", "amount": "1000"},  # high(6.49) < open(6.62) 错乱
+    ]}
+    monkeypatch.setattr(
+        "ashare_pilot.datasource.stockapi_source.requests.get",
+        lambda *a, **k: _FakeResp(bad),
+    )
+    with pytest.raises(DataIntegrityError):
+        StockApiSource(token="TK").fetch_daily("002654", "20260609", "20260609")

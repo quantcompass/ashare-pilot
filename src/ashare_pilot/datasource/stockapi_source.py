@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from .base import validate
+from .base import check_ohlc_sane, validate
 
 _BASE_URL = "https://www.stockapi.com.cn/v1/base/day"
 
@@ -113,4 +113,5 @@ class StockApiSource:
         df = df.set_index("date")[_OUT_COLUMNS].sort_index()
         for col in _OUT_COLUMNS:
             df[col] = df[col].astype("float64")
-        return validate(df)
+        # 拦截 stockapi 个别票偶发的坏数据(OHLC 错乱)，让 FallbackSource 回落备源
+        return check_ohlc_sane(validate(df))
