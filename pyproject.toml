@@ -11,6 +11,8 @@ dependencies = [
     "akshare>=1.18.64",
     "numpy>=2.4.6",
     "pandas>=3.0.3",
+    "pyarrow>=22.0.0",
+    "requests>=2.32.0",
 ]
 
 [project.scripts]

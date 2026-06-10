@@ -6,6 +6,11 @@ from typing import Protocol
 
 import pandas as pd
 
+# 核心必需列：所有数据源都必须提供（策略/回测只依赖这些）
+CORE_COLUMNS = ["open", "high", "low", "close"]
+# 可选列：有则带上。不同源支持程度不同（腾讯无 volume、stockapi 有 amount）
+OPTIONAL_COLUMNS = ["volume", "amount"]
+# 向后兼容：旧代码（akshare_source）引用的全集
 REQUIRED_COLUMNS = ["open", "high", "low", "close", "volume"]
 
 
@@ -31,7 +36,7 @@ class DataSource(Protocol):
 
 def validate(df: pd.DataFrame) -> pd.DataFrame:
     """校验 DataFrame 是否符合数据契约，符合则原样返回，否则抛错。"""
-    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    missing = [c for c in CORE_COLUMNS if c not in df.columns]
     if missing:
         raise ValueError(f"数据缺少必需列：{missing}")
     if df.index.name != "date":
