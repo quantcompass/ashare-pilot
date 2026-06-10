@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ashare_pilot.datasource.base import DataSource
-from ashare_pilot.strategy import golden_cross
+from ashare_pilot.strategy import breakout, golden_cross
 
 
 @dataclass
@@ -55,4 +55,63 @@ def scan_buy_signals(
     return result
 
 
-__all__ = ["scan_buy_signals", "ScanResult"]
+@dataclass
+class BreakoutHit:
+    """一只巨量启动波段股的扫描结果。"""
+
+    symbol: str
+    launch_date: str       # 启动日
+    launch_gain: float     # 启动当日涨幅
+    vol_ratio: float       # 启动当日量比
+    since_launch: float    # 启动至今涨跌
+    from_peak: float       # 距启动后高点回撤
+    stage: str             # 阶段标注
+
+
+def scan_breakouts(
+    source: DataSource,
+    symbols: list[str],
+    start: str,
+    end: str,
+    recent_days: int = 15,
+    vol_ratio: float = 3.0,
+    pct_change: float = 0.09,
+    adjust: str = "qfq",
+) -> list[BreakoutHit]:
+    """扫描 symbols，找出近 recent_days 内出现「巨量启动」的波段股并标注阶段。
+
+    取数失败、或数据源不含成交量(如腾讯源)的标的会被跳过，不中断扫描。
+    """
+    hits: list[BreakoutHit] = []
+    for symbol in symbols:
+        try:
+            df = source.fetch_daily(symbol, start, end, adjust=adjust)
+        except Exception:  # noqa: BLE001
+            continue
+        if "volume" not in df.columns or len(df) < 6:
+            continue  # 无成交量无法判断启动
+
+        close, volume = df["close"], df["volume"]
+        sig = breakout.detect_breakout(close, volume, vol_ratio, pct_change)
+        recent = sig.tail(recent_days)
+        launches = recent[recent == 1]
+        if not len(launches):
+            continue
+
+        ld = launches.index[-1]
+        after = close.loc[ld:]
+        peak, cur, lpx = after.max(), close.iloc[-1], close.loc[ld]
+        vr = (volume / volume.rolling(5).mean().shift(1)).loc[ld]
+        hits.append(BreakoutHit(
+            symbol=symbol,
+            launch_date=ld.strftime("%Y-%m-%d"),
+            launch_gain=float(close.pct_change().loc[ld]),
+            vol_ratio=float(vr),
+            since_launch=float(cur / lpx - 1),
+            from_peak=float(cur / peak - 1),
+            stage=breakout.stage(float(cur / peak - 1)),
+        ))
+    return hits
+
+
+__all__ = ["scan_buy_signals", "ScanResult", "scan_breakouts", "BreakoutHit"]

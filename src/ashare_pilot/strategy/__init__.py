@@ -6,6 +6,6 @@
 信号约定：1 = 买入，-1 = 卖出，0 = 无动作/持有。
 """
 
-from . import golden_cross
+from . import breakout, golden_cross
 
-__all__ = ["golden_cross"]
+__all__ = ["golden_cross", "breakout"]
